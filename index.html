@@ -1145,10 +1145,10 @@
         let currentUnitCriticalLists = {};
 
         document.addEventListener("DOMContentLoaded", () => {
-            // OPTIMASI 1: Coba muat dari Cache Lokal DULU secara instan (Kecepatan < 0.1s)
+            // Load cache instan DULU saat halaman pertama terbuka
             loadFromCache();
 
-            // OPTIMASI 2: Muat data terbaru dari server secara paralel di latar belakang
+            // Lakukan pemuatan paralel di latar belakang
             fetchAllDataParalel();
 
             // Auto Sync tiap 30 detik
@@ -1169,7 +1169,7 @@
         });
 
         // ==========================================
-        // OPTIMASI CACHE & PEMUATAN PARALEL INSTAN
+        // CACHE INSTAN & PEMUATAN PARALEL
         // ==========================================
         function loadFromCache() {
             try {
@@ -1186,12 +1186,23 @@
                     filterUnitTable();
                     renderUnitDashboard();
                 }
-            } catch (e) {
-                console.log("Belum ada cache lokal.");
-            }
+            } catch (e) { }
         }
 
-        // Helper Fetch dengan Timeout (Maksimal 10 Detik)
+        function updateKaryawanCacheAndRender(newData) {
+            karyawanData = newData;
+            localStorage.setItem('cache_karyawan', JSON.stringify(newData));
+            filterTable();
+            renderDashboard();
+        }
+
+        function updateUnitCacheAndRender(newData) {
+            unitData = newData;
+            localStorage.setItem('cache_unit', JSON.stringify(newData));
+            filterUnitTable();
+            renderUnitDashboard();
+        }
+
         async function fetchWithTimeout(resource, options = {}) {
             const { timeout = 10000 } = options;
             const controller = new AbortController();
@@ -1206,9 +1217,7 @@
 
         async function fetchAllDataParalel(isSilent = false) {
             if (!isSilent && karyawanData.length === 0) showLoading(true);
-
             try {
-                // Eksekusi Karyawan & Unit bersamaan
                 await Promise.all([
                     fetchData(true),
                     fetchUnitData(true)
@@ -1604,7 +1613,7 @@
         function showLoading(show) { show ? document.getElementById('loadingIndicator').classList.remove('hidden') : document.getElementById('loadingIndicator').classList.add('hidden'); }
 
         // ==========================================
-        // FETCH DATA KARYAWAN (DENGAN CACHE + TIMEOUT)
+        // FETCH DATA KARYAWAN REAL-TIME
         // ==========================================
         async function fetchData(isSilent = false) {
             if (!isSilent && karyawanData.length === 0) showLoading(true);
@@ -1613,7 +1622,7 @@
                     method: 'GET',
                     redirect: 'follow',
                     headers: { 'Accept': 'application/json' },
-                    timeout: 10000 // Maksimal 10 Detik
+                    timeout: 10000
                 });
 
                 if (!response.ok) throw new Error("Gagal terhubung ke API Karyawan");
@@ -1624,11 +1633,7 @@
                 const data = JSON.parse(rawText);
 
                 if (Array.isArray(data)) {
-                    karyawanData = data;
-                    // Simpan ke Cache Lokal
-                    localStorage.setItem('cache_karyawan', JSON.stringify(data));
-                    filterTable();
-                    renderDashboard();
+                    updateKaryawanCacheAndRender(data);
                 }
             } catch (err) {
                 console.error("Gagal mengambil data karyawan:", err);
@@ -1637,6 +1642,9 @@
             }
         }
 
+        // ==========================================
+        // EDIT / TAMBAH KARYAWAN (OPTIMISTIC INSTAN 0 DETIK)
+        // ==========================================
         async function handleFormSubmit(e) {
             e.preventDefault();
             const dataObj = Object.fromEntries(new FormData(document.getElementById('karyawanForm')).entries());
@@ -1647,48 +1655,51 @@
                 return;
             }
 
-            const submitBtn = document.getElementById('btnSubmitKaryawan');
-            const originalBtnText = submitBtn.innerHTML;
-            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Menyimpan...';
-            submitBtn.disabled = true;
+            // OPTIMISTIC UPDATE: Update data di layar DULU
+            let targetList = [...karyawanData];
+            let isEdit = false;
 
-            Swal.fire({ title: 'Menyimpan...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+            if (dataObj.ID) {
+                const index = targetList.findIndex(k => String(k.ID) === String(dataObj.ID));
+                if (index > -1) {
+                    targetList[index] = { ...targetList[index], ...dataObj };
+                    isEdit = true;
+                }
+            }
+            if (!isEdit) {
+                if (!dataObj.ID) dataObj.ID = "temp_" + Date.now();
+                targetList.unshift(dataObj);
+            }
 
+            // Render layar instan tanpa menunggu server
+            updateKaryawanCacheAndRender(targetList);
+            closeModal();
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Berhasil Disimpan!',
+                text: 'Perubahan telah diterapkan di layar.',
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // Kirim ke Google Sheets di Latar Belakang (Background Sync)
             try {
-                const response = await fetchWithTimeout(API_URL, {
+                await fetchWithTimeout(API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action: 'saveKaryawan', data: dataObj }),
-                    timeout: 12000
+                    timeout: 15000
                 });
-
-                let res = { success: true, message: "Data berhasil disimpan!" };
-                try {
-                    const rawText = await response.text();
-                    if (rawText) res = JSON.parse(rawText);
-                } catch (parseErr) { }
-
-                submitBtn.innerHTML = originalBtnText;
-                submitBtn.disabled = false;
-
-                if (res.success !== false) {
-                    Swal.fire('Sukses!', res.message || 'Data berhasil disimpan!', 'success');
-                    closeModal();
-                    fetchData();
-                } else {
-                    Swal.fire('Gagal!', res.error || res.message, 'error');
-                }
+                fetchData(true); // Sync ulang background
             } catch (err) {
-                console.error("Submit Error:", err);
-                submitBtn.innerHTML = originalBtnText;
-                submitBtn.disabled = false;
-
-                Swal.fire('Sukses!', 'Data berhasil disimpan ke Spreadsheet!', 'success');
-                closeModal();
-                fetchData();
+                console.error("Background sync error saveKaryawan:", err);
             }
         }
 
+        // ==========================================
+        // HAPUS KARYAWAN (OPTIMISTIC INSTAN 0 DETIK)
+        // ==========================================
         function confirmDelete(id, nama) {
             Swal.fire({
                 title: 'Hapus Karyawan?',
@@ -1699,30 +1710,29 @@
                 confirmButtonText: 'Ya, Hapus!'
             }).then(async (result) => {
                 if (result.isConfirmed) {
-                    Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+                    // OPTIMISTIC DELETE: Langsung Hapus Baris dari Layar (0 Detik)
+                    const updatedList = karyawanData.filter(k => String(k.ID) !== String(id));
+                    updateKaryawanCacheAndRender(updatedList);
+
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Terhapus!',
+                        text: `${nama} telah dihapus.`,
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+
+                    // Proses Hapus di Server (Background Sync)
                     try {
-                        const response = await fetchWithTimeout(API_URL, {
+                        await fetchWithTimeout(API_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                             body: JSON.stringify({ action: 'deleteKaryawan', id: id }),
                             timeout: 10000
                         });
-
-                        let res = { success: true, message: "Data berhasil dihapus!" };
-                        try {
-                            const rawText = await response.text();
-                            if (rawText) res = JSON.parse(rawText);
-                        } catch (p) { }
-
-                        if (res.success !== false) {
-                            Swal.fire('Terhapus!', res.message || 'Data berhasil dihapus!', 'success');
-                            fetchData();
-                        } else {
-                            Swal.fire('Gagal!', res.message || res.error, 'error');
-                        }
+                        fetchData(true); // Sync ulang background
                     } catch (err) {
-                        Swal.fire('Terhapus!', 'Data berhasil dihapus dari Spreadsheet!', 'success');
-                        fetchData();
+                        console.error("Background sync delete error:", err);
                     }
                 }
             });
@@ -2029,7 +2039,7 @@
         }
 
         // ==========================================
-        // FETCH DATA UNIT (DENGAN CACHE + TIMEOUT)
+        // FETCH DATA UNIT REAL-TIME
         // ==========================================
         async function fetchUnitData(isSilent = false) {
             const tbody = document.getElementById('unitTableBody');
@@ -2040,7 +2050,7 @@
                     method: 'GET',
                     redirect: 'follow',
                     headers: { 'Accept': 'application/json' },
-                    timeout: 10000 // Maksimal 10 Detik
+                    timeout: 10000
                 });
 
                 if (!response.ok) throw new Error("Gagal terhubung ke API Unit");
@@ -2051,11 +2061,7 @@
                 const data = JSON.parse(rawText);
 
                 if (Array.isArray(data)) {
-                    unitData = data;
-                    // Simpan ke Cache Lokal
-                    localStorage.setItem('cache_unit', JSON.stringify(data));
-                    filterUnitTable();
-                    renderUnitDashboard();
+                    updateUnitCacheAndRender(data);
                 }
             } catch (err) {
                 console.error("Gagal mengambil data unit:", err);
@@ -2188,6 +2194,9 @@
         function closeUnitModal() { document.getElementById('unitFormModal').classList.remove('modal-active'); }
         function editUnit(rowObj) { openUnitModal(rowObj); }
 
+        // ==========================================
+        // EDIT / TAMBAH UNIT (OPTIMISTIC INSTAN 0 DETIK)
+        // ==========================================
         async function handleUnitFormSubmit(e) {
             e.preventDefault();
             const dataObj = Object.fromEntries(new FormData(document.getElementById('unitForm')).entries());
@@ -2196,48 +2205,51 @@
                 return;
             }
 
-            const submitBtn = document.getElementById('btnSubmitUnit');
-            const originalBtnText = submitBtn.innerHTML;
-            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Menyimpan...';
-            submitBtn.disabled = true;
+            // OPTIMISTIC UPDATE: Update data unit di layar DULU
+            let targetList = [...unitData];
+            let isEdit = false;
 
-            Swal.fire({ title: 'Menyimpan Unit...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+            if (dataObj.ID) {
+                const index = targetList.findIndex(u => String(u.ID) === String(dataObj.ID));
+                if (index > -1) {
+                    targetList[index] = { ...targetList[index], ...dataObj };
+                    isEdit = true;
+                }
+            }
+            if (!isEdit) {
+                if (!dataObj.ID) dataObj.ID = "temp_unit_" + Date.now();
+                targetList.unshift(dataObj);
+            }
 
+            // Render layar instan tanpa menunggu server
+            updateUnitCacheAndRender(targetList);
+            closeUnitModal();
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Unit Disimpan!',
+                text: 'Perubahan unit diterapkan di layar.',
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // Kirim ke Google Sheets di Latar Belakang
             try {
-                const response = await fetchWithTimeout(API_URL, {
+                await fetchWithTimeout(API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action: 'saveUnit', data: dataObj }),
-                    timeout: 12000
+                    timeout: 15000
                 });
-
-                let res = { success: true, message: "Data unit berhasil disimpan!" };
-                try {
-                    const rawText = await response.text();
-                    if (rawText) res = JSON.parse(rawText);
-                } catch (parseErr) { }
-
-                submitBtn.innerHTML = originalBtnText;
-                submitBtn.disabled = false;
-
-                if (res.success !== false) {
-                    Swal.fire('Sukses!', res.message || 'Data unit disimpan!', 'success');
-                    closeUnitModal();
-                    fetchUnitData();
-                } else {
-                    Swal.fire('Gagal!', res.error || res.message, 'error');
-                }
+                fetchUnitData(true);
             } catch (err) {
-                console.error("Submit Unit Error:", err);
-                submitBtn.innerHTML = originalBtnText;
-                submitBtn.disabled = false;
-
-                Swal.fire('Sukses!', 'Data unit berhasil disimpan ke Spreadsheet!', 'success');
-                closeUnitModal();
-                fetchUnitData();
+                console.error("Background sync error saveUnit:", err);
             }
         }
 
+        // ==========================================
+        // HAPUS UNIT (OPTIMISTIC INSTAN 0 DETIK)
+        // ==========================================
         function confirmDeleteUnit(id, noUnit) {
             Swal.fire({
                 title: 'Hapus Unit?',
@@ -2248,30 +2260,29 @@
                 confirmButtonText: 'Ya, Hapus!'
             }).then(async (result) => {
                 if (result.isConfirmed) {
-                    Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+                    // OPTIMISTIC DELETE: Langsung Hapus Unit dari Layar (0 Detik)
+                    const updatedList = unitData.filter(u => String(u.ID) !== String(id));
+                    updateUnitCacheAndRender(updatedList);
+
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Terhapus!',
+                        text: `Unit ${noUnit} telah dihapus.`,
+                        timer: 1500,
+                        showConfirmButton: false
+                    });
+
+                    // Proses Hapus di Server (Background Sync)
                     try {
-                        const response = await fetchWithTimeout(API_URL, {
+                        await fetchWithTimeout(API_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                             body: JSON.stringify({ action: 'deleteUnit', id: id }),
                             timeout: 10000
                         });
-
-                        let res = { success: true, message: "Unit berhasil dihapus!" };
-                        try {
-                            const rawText = await response.text();
-                            if (rawText) res = JSON.parse(rawText);
-                        } catch (p) { }
-
-                        if (res.success !== false) {
-                            Swal.fire('Terhapus!', res.message || 'Unit terhapus!', 'success');
-                            fetchUnitData();
-                        } else {
-                            Swal.fire('Gagal!', res.message || res.error, 'error');
-                        }
+                        fetchUnitData(true);
                     } catch (err) {
-                        Swal.fire('Terhapus!', 'Unit berhasil dihapus dari Spreadsheet!', 'success');
-                        fetchUnitData();
+                        console.error("Background sync delete unit error:", err);
                     }
                 }
             });
@@ -2300,55 +2311,93 @@
         }
 
         function handleImport(event) {
-            const file = event.target.files[0]; if (!file) return;
-            Swal.fire({ title: 'Memproses Data...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+            const file = event.target.files[0];
+            if (!file) return;
+
+            Swal.fire({
+                title: 'Memproses Data...',
+                text: 'Membaca dan memvalidasi file Excel',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
             const reader = new FileReader();
             reader.onload = async function (e) {
                 try {
-                    const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-                    let jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { raw: true });
-                    if (jsonData.length === 0) { Swal.fire('Info', 'File Excel kosong.', 'info'); event.target.value = ''; return; }
+                    const dataBuffer = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(dataBuffer, { type: 'array', cellDates: true, dateNF: 'yyyy-mm-dd' });
+
+                    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                        throw new Error("Sheet Excel tidak ditemukan.");
+                    }
+
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    let jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: false });
+
+                    if (!jsonData || jsonData.length === 0) {
+                        Swal.fire('Info', 'File Excel kosong atau format kolom tidak sesuai.', 'info');
+                        event.target.value = '';
+                        return;
+                    }
+
                     const cleanData = jsonData.map(row => {
                         let newRow = {};
                         for (let key in row) {
-                            let val = row[key]; const strKey = String(key).trim();
+                            let val = row[key];
+                            const strKey = String(key || '').trim();
+                            if (!strKey) continue;
+
+                            if (typeof val === 'string') {
+                                val = val.trim();
+                            }
+
                             if (strKey.includes('Tgl') || strKey.includes('Exp')) {
-                                if (val instanceof Date) { val = `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`; }
-                                else if (typeof val === 'number') { const jsDate = new Date(Math.round((val - 25569) * 86400 * 1000)); val = `${jsDate.getUTCFullYear()}-${String(jsDate.getUTCMonth() + 1).padStart(2, '0')}-${String(jsDate.getUTCDate()).padStart(2, '0')}`; }
-                                else if (typeof val === 'string') {
-                                    val = val.trim(); let sep = ''; if (val.includes(':')) sep = ':'; else if (val.includes('/')) sep = '/'; else if (val.includes('-') && val.split('-')[0].length <= 2) sep = '-';
-                                    if (sep !== '') { const parts = val.split(sep); if (parts.length === 3) { let d = parts[0].padStart(2, '0'); let m = parts[1].padStart(2, '0'); let y = parts[2]; if (y.length === 2) y = '20' + y; if (y.length === 4) val = `${y}-${m}-${d}`; } }
+                                if (val) {
+                                    try {
+                                        const d = new Date(val);
+                                        if (!isNaN(d.getTime())) {
+                                            const yyyy = d.getFullYear();
+                                            const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                            const dd = String(d.getDate()).padStart(2, '0');
+                                            val = `${yyyy}-${mm}-${dd}`;
+                                        }
+                                    } catch (e) { }
                                 }
                             }
                             newRow[strKey] = val;
                         }
                         return newRow;
-                    });
+                    }).filter(r => r.NRP && String(r.NRP).trim() !== '');
 
-                    Swal.fire({ title: 'Menyimpan Data...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+                    if (cleanData.length === 0) {
+                        Swal.fire('Warning', 'Tidak ada data valid yang memiliki NRP.', 'warning');
+                        event.target.value = '';
+                        return;
+                    }
 
-                    const response = await fetchWithTimeout(API_URL, {
+                    // Tampilkan Langsung Data Import di Layar
+                    const mergedList = [...cleanData, ...karyawanData];
+                    updateKaryawanCacheAndRender(mergedList);
+
+                    Swal.fire('Berhasil!', `Berhasil memproses ${cleanData.length} data!`, 'success');
+
+                    // Sync ke Server Google Sheets
+                    await fetchWithTimeout(API_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify({ action: 'importKaryawanBulk', data: cleanData }),
-                        timeout: 15000
+                        timeout: 30000
                     });
 
-                    let res = { success: true, message: "Import data selesai!" };
-                    try {
-                        const rawText = await response.text();
-                        if (rawText) res = JSON.parse(rawText);
-                    } catch (p) { }
-
-                    if (res.success !== false) {
-                        Swal.fire('Berhasil!', res.message || 'Import data selesai!', 'success');
-                        fetchData();
-                    } else {
-                        Swal.fire('Gagal!', res.error || res.message, 'error');
-                    }
+                    fetchData(true);
                     event.target.value = '';
-                } catch (err) { Swal.fire('Error!', 'Gagal memproses file.', 'error'); event.target.value = ''; }
+                } catch (err) {
+                    console.error("Import Error Detail:", err);
+                    Swal.fire('Error!', 'Gagal memproses file. Pastikan file berformat .xlsx atau .csv standar.', 'error');
+                    event.target.value = '';
+                }
             };
+
             reader.readAsArrayBuffer(file);
         }
     </script>
