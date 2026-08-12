@@ -1,3 +1,12 @@
+// ==========================================
+// KONFIGURASI DATABASE SPREADSHEET
+// ==========================================
+const SPREADSHEET_ID = '1MEq3tn_6jhCrSTQB1fdq1ai13SXyPRccKaxcwPSUXLM';
+
+function getSpreadsheet() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('SE Dashboard - Monitoring Karyawan & Unit')
@@ -6,7 +15,7 @@ function doGet() {
 }
 
 function setupDatabase() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   let sheet = ss.getSheetByName('Data Karyawan');
   if (!sheet) {
     sheet = ss.insertSheet('Data Karyawan');
@@ -35,7 +44,7 @@ function setupDatabase() {
 // FUNGSI CRUD KARYAWAN (SUPER CEPAT)
 // ==========================================
 function getDataKaryawan() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Karyawan');
+  const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
   if (!sheet) return JSON.stringify([]);
   
   const lastRow = sheet.getLastRow();
@@ -68,7 +77,7 @@ function getDataKaryawan() {
 
 function saveKaryawan(formData) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Karyawan');
+    const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
     const data = sheet.getDataRange().getValues();
     const id = formData.ID || Utilities.getUuid();
     
@@ -98,7 +107,7 @@ function saveKaryawan(formData) {
 
 function deleteKaryawan(id) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Karyawan');
+    const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
     const data = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues(); // Ambil ID saja
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] == id) {
@@ -112,7 +121,7 @@ function deleteKaryawan(id) {
 
 function importKaryawanBulk(jsonData) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Karyawan');
+    const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     
@@ -152,7 +161,7 @@ function importKaryawanBulk(jsonData) {
 // FUNGSI CRUD UNIT
 // ==========================================
 function getDataUnit() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Unit');
+  const sheet = getSpreadsheet().getSheetByName('Data Unit');
   if (!sheet) return JSON.stringify([]);
   
   const lastRow = sheet.getLastRow();
@@ -184,7 +193,7 @@ function getDataUnit() {
 
 function saveUnit(formData) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Unit');
+    const sheet = getSpreadsheet().getSheetByName('Data Unit');
     const data = sheet.getDataRange().getValues();
     const id = formData.ID || Utilities.getUuid();
     const noUnit = (formData.NoUnit || "").trim().toUpperCase();
@@ -201,7 +210,7 @@ function saveUnit(formData) {
 
 function deleteUnit(id) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data Unit');
+    const sheet = getSpreadsheet().getSheetByName('Data Unit');
     const data = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
     for (let i = 1; i < data.length; i++) { if (data[i][0] == id) { sheet.deleteRow(i + 1); return { success: true, message: "Unit dihapus!" }; } }
     return { success: false, message: "ID Unit tidak ditemukan." };
