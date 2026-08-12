@@ -7,13 +7,61 @@ function getSpreadsheet() {
   return SpreadsheetApp.openById(SPREADSHEET_ID);
 }
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
+// ==========================================
+// HANDLER ROUTING UNTUK VERCEL & WEB APP (GET & POST)
+// ==========================================
+function doGet(e) {
+  // Jika dipanggil oleh Vercel via fetch dengan parameter action
+  if (e && e.parameter && e.parameter.action) {
+    const action = e.parameter.action;
+    
+    if (action === 'getKaryawan') {
+      return ContentService.createTextOutput(getDataKaryawan())
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    if (action === 'getUnit') {
+      return ContentService.createTextOutput(getDataUnit())
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  // Tampilan Default jika dibuka langsung di Google Apps Script
+  return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('SE Dashboard - Monitoring Karyawan & Unit')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+function doPost(e) {
+  try {
+    const contents = JSON.parse(e.postData.contents);
+    const action = contents.action;
+    let result = { success: false, message: "Aksi tidak dikenal" };
+
+    if (action === 'saveKaryawan') {
+      result = saveKaryawan(contents.data);
+    } else if (action === 'deleteKaryawan') {
+      result = deleteKaryawan(contents.id);
+    } else if (action === 'importKaryawanBulk') {
+      result = importKaryawanBulk(contents.data);
+    } else if (action === 'saveUnit') {
+      result = saveUnit(contents.data);
+    } else if (action === 'deleteUnit') {
+      result = deleteUnit(contents.id);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ==========================================
+// SETUP INITIAL DATABASE
+// ==========================================
 function setupDatabase() {
   const ss = getSpreadsheet();
   let sheet = ss.getSheetByName('Data Karyawan');
@@ -41,7 +89,7 @@ function setupDatabase() {
 }
 
 // ==========================================
-// FUNGSI CRUD KARYAWAN (SUPER CEPAT)
+// FUNGSI CRUD KARYAWAN
 // ==========================================
 function getDataKaryawan() {
   const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
@@ -50,7 +98,6 @@ function getDataKaryawan() {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return JSON.stringify([]);
   
-  // Mengambil 17 Kolom Pertama (Hanya Data Teks & Tanggal)
   const data = sheet.getRange(1, 1, lastRow, 17).getValues();
   const headers = data[0];
   const result = [];
@@ -62,7 +109,7 @@ function getDataKaryawan() {
     let obj = {};
     for (let j = 0; j < headers.length; j++) {
       let val = row[j];
-      if (val instanceof Date) { // Konversi tanggal format Spreadsheet
+      if (val instanceof Date) {
         const y = val.getFullYear();
         const m = String(val.getMonth() + 1).padStart(2, '0');
         const d = String(val.getDate()).padStart(2, '0');
@@ -81,7 +128,6 @@ function saveKaryawan(formData) {
     const data = sheet.getDataRange().getValues();
     const id = formData.ID || Utilities.getUuid();
     
-    // Susun data murni 17 Kolom
     const rowData = [
       id, formData.NRP || "", formData.Nama || "", formData.Perusahaan || "", formData.Jabatan || "", formData.TglLahir || "",
       formData.ExpSIMPER_BIB || "", formData.ExpSIMPER_TIA || "", formData.ExpSIM_B2 || "", formData.TglMCU || "", formData.ExpMCU || "",
@@ -94,11 +140,9 @@ function saveKaryawan(formData) {
     }
 
     if (rowIndex > -1) {
-      // Update data pada baris yang sama
       sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
       return { success: true, message: "Data berhasil diperbarui!" };
     } else {
-      // Tambah baris baru
       sheet.appendRow(rowData);
       return { success: true, message: "Data baru berhasil ditambahkan!" };
     }
@@ -108,7 +152,7 @@ function saveKaryawan(formData) {
 function deleteKaryawan(id) {
   try {
     const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
-    const data = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues(); // Ambil ID saja
+    const data = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] == id) {
         sheet.deleteRow(i + 1);
@@ -132,14 +176,13 @@ function importKaryawanBulk(jsonData) {
       const nrpString = String(item.NRP).trim();
       let rowIndex = -1;
       
-      // Cek apakah NRP sudah ada di database
       for (let i = 1; i < data.length; i++) { if (String(data[i][1]).trim() === nrpString) { rowIndex = i + 1; break; } }
 
       let rowData = new Array(headers.length).fill("");
       if (rowIndex > -1) { rowData = data[rowIndex - 1]; } else { rowData[0] = Utilities.getUuid(); }
 
       headers.forEach((header, index) => {
-        if (index === 0) return; // Lewati kolom ID
+        if (index === 0) return;
         if (item[header] !== undefined) { rowData[index] = item[header]; }
       });
 
