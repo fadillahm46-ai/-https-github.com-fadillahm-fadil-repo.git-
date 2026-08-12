@@ -9,7 +9,7 @@
     <!-- PWA Manifest & Ikon untuk Install ke HP -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0f172a">
-    <link rel="apple-touch-icon" href="https://drive.google.com/uc?export=view&id=1FEQKU7Tf9Wkt_NNBXTJhv_v_0PKU6R8V">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3135/3135715.png">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -662,7 +662,7 @@
                                 <i class="fa-solid fa-file-excel"></i> Export Rekap
                             </button>
                             <button onclick="openModal()"
-                                class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-blue-500/20 whitespace-nowrap text-sm">
+                                class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-blue-500/30 whitespace-nowrap text-sm">
                                 <i class="fa-solid fa-user-plus"></i> Tambah Karyawan
                             </button>
                         </div>
@@ -725,7 +725,7 @@
                                 <i class="fa-solid fa-file-excel"></i> Export Rekap
                             </button>
                             <button onclick="openUnitModal()"
-                                class="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-indigo-500/20 whitespace-nowrap text-sm">
+                                class="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md shadow-indigo-500/30 whitespace-nowrap text-sm">
                                 <i class="fa-solid fa-truck-medical"></i> Tambah Unit
                             </button>
                         </div>
@@ -1116,7 +1116,7 @@
                         <div class="space-y-1 p-3 bg-amber-50/50 rounded-lg border border-amber-100">
                             <label class="text-xs font-bold text-amber-800 block mb-1">Exp. TMA</label>
                             <input type="date" id="formUnit_ExpTMA" name="ExpKom_TMA"
-                                class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none cursor-pointer">
+                                class="w-full px-2 py-2 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none cursor-pointer">
                         </div>
                     </div>
                 </form>
@@ -1162,6 +1162,15 @@
         document.addEventListener("DOMContentLoaded", () => {
             loadFromCache();
             fetchAllDataParalel();
+
+            // Pendaftaran Service Worker untuk PWA Install Prompt
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('/sw.js')
+                        .then((reg) => console.log('ServiceWorker registered', reg))
+                        .catch((err) => console.log('ServiceWorker failed', err));
+                });
+            }
 
             setInterval(() => {
                 fetchAllDataParalel(true);
@@ -2371,7 +2380,7 @@
                     }).filter(r => r.NRP && String(r.NRP).trim() !== '');
 
                     if (cleanData.length === 0) {
-                        Swal.fire('Warning', 'Tidak ada data valid yang memiliki NRP.', 'warning');
+                        Swal.fire('Warning', 'Test Tidak ada data valid yang memiliki NRP.', 'warning');
                         event.target.value = '';
                         return;
                     }
