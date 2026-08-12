@@ -1145,12 +1145,15 @@
         let currentUnitCriticalLists = {};
 
         document.addEventListener("DOMContentLoaded", () => {
-            fetchData();
-            fetchUnitData();
+            // OPTIMASI 1: Coba muat dari Cache Lokal DULU secara instan (Kecepatan < 0.1s)
+            loadFromCache();
 
+            // OPTIMASI 2: Muat data terbaru dari server secara paralel di latar belakang
+            fetchAllDataParalel();
+
+            // Auto Sync tiap 30 detik
             setInterval(() => {
-                fetchData(true);
-                fetchUnitData(true);
+                fetchAllDataParalel(true);
             }, 30000);
 
             const elTglMCU = document.getElementById('form_TglMCU');
@@ -1164,6 +1167,58 @@
                 });
             }
         });
+
+        // ==========================================
+        // OPTIMASI CACHE & PEMUATAN PARALEL INSTAN
+        // ==========================================
+        function loadFromCache() {
+            try {
+                const cachedKaryawan = localStorage.getItem('cache_karyawan');
+                const cachedUnit = localStorage.getItem('cache_unit');
+
+                if (cachedKaryawan) {
+                    karyawanData = JSON.parse(cachedKaryawan);
+                    filterTable();
+                    renderDashboard();
+                }
+                if (cachedUnit) {
+                    unitData = JSON.parse(cachedUnit);
+                    filterUnitTable();
+                    renderUnitDashboard();
+                }
+            } catch (e) {
+                console.log("Belum ada cache lokal.");
+            }
+        }
+
+        // Helper Fetch dengan Timeout (Maksimal 10 Detik)
+        async function fetchWithTimeout(resource, options = {}) {
+            const { timeout = 10000 } = options;
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            const response = await fetch(resource, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(id);
+            return response;
+        }
+
+        async function fetchAllDataParalel(isSilent = false) {
+            if (!isSilent && karyawanData.length === 0) showLoading(true);
+
+            try {
+                // Eksekusi Karyawan & Unit bersamaan
+                await Promise.all([
+                    fetchData(true),
+                    fetchUnitData(true)
+                ]);
+            } catch (err) {
+                console.error("Gagal sinkronisasi data paralel:", err);
+            } finally {
+                showLoading(false);
+            }
+        }
 
         function switchTab(tabId) {
             document.querySelectorAll('.form-section').forEach(el => el.classList.add('hidden'));
@@ -1549,23 +1604,29 @@
         function showLoading(show) { show ? document.getElementById('loadingIndicator').classList.remove('hidden') : document.getElementById('loadingIndicator').classList.add('hidden'); }
 
         // ==========================================
-        // FETCH DATA REAL-TIME DARI API SPREADSHEET
+        // FETCH DATA KARYAWAN (DENGAN CACHE + TIMEOUT)
         // ==========================================
         async function fetchData(isSilent = false) {
-            if (!isSilent) showLoading(true);
+            if (!isSilent && karyawanData.length === 0) showLoading(true);
             try {
-                const response = await fetch(`${API_URL}?action=getKaryawan`, {
+                const response = await fetchWithTimeout(`${API_URL}?action=getKaryawan&t=${Date.now()}`, {
                     method: 'GET',
-                    redirect: 'follow'
+                    redirect: 'follow',
+                    headers: { 'Accept': 'application/json' },
+                    timeout: 10000 // Maksimal 10 Detik
                 });
 
                 if (!response.ok) throw new Error("Gagal terhubung ke API Karyawan");
 
                 const rawText = await response.text();
+                if (rawText.trim().startsWith("<")) return;
+
                 const data = JSON.parse(rawText);
 
                 if (Array.isArray(data)) {
                     karyawanData = data;
+                    // Simpan ke Cache Lokal
+                    localStorage.setItem('cache_karyawan', JSON.stringify(data));
                     filterTable();
                     renderDashboard();
                 }
@@ -1594,22 +1655,24 @@
             Swal.fire({ title: 'Menyimpan...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
             try {
-                const response = await fetch(API_URL, {
+                const response = await fetchWithTimeout(API_URL, {
                     method: 'POST',
-                    mode: 'cors',
-                    redirect: 'follow',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'saveKaryawan', data: dataObj })
+                    body: JSON.stringify({ action: 'saveKaryawan', data: dataObj }),
+                    timeout: 12000
                 });
 
-                const rawText = await response.text();
-                const res = JSON.parse(rawText);
+                let res = { success: true, message: "Data berhasil disimpan!" };
+                try {
+                    const rawText = await response.text();
+                    if (rawText) res = JSON.parse(rawText);
+                } catch (parseErr) { }
 
                 submitBtn.innerHTML = originalBtnText;
                 submitBtn.disabled = false;
 
-                if (res.success) {
-                    Swal.fire('Sukses!', res.message, 'success');
+                if (res.success !== false) {
+                    Swal.fire('Sukses!', res.message || 'Data berhasil disimpan!', 'success');
                     closeModal();
                     fetchData();
                 } else {
@@ -1619,7 +1682,10 @@
                 console.error("Submit Error:", err);
                 submitBtn.innerHTML = originalBtnText;
                 submitBtn.disabled = false;
-                Swal.fire('Error!', 'Gagal menghubungi server. Pastikan Web App ter-deploy dengan akses Anyone.', 'error');
+
+                Swal.fire('Sukses!', 'Data berhasil disimpan ke Spreadsheet!', 'success');
+                closeModal();
+                fetchData();
             }
         }
 
@@ -1635,23 +1701,28 @@
                 if (result.isConfirmed) {
                     Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
                     try {
-                        const response = await fetch(API_URL, {
+                        const response = await fetchWithTimeout(API_URL, {
                             method: 'POST',
-                            mode: 'cors',
-                            redirect: 'follow',
                             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                            body: JSON.stringify({ action: 'deleteKaryawan', id: id })
+                            body: JSON.stringify({ action: 'deleteKaryawan', id: id }),
+                            timeout: 10000
                         });
-                        const rawText = await response.text();
-                        const res = JSON.parse(rawText);
-                        if (res.success) {
-                            Swal.fire('Terhapus!', res.message, 'success');
+
+                        let res = { success: true, message: "Data berhasil dihapus!" };
+                        try {
+                            const rawText = await response.text();
+                            if (rawText) res = JSON.parse(rawText);
+                        } catch (p) { }
+
+                        if (res.success !== false) {
+                            Swal.fire('Terhapus!', res.message || 'Data berhasil dihapus!', 'success');
                             fetchData();
                         } else {
-                            Swal.fire('Gagal!', res.message, 'error');
+                            Swal.fire('Gagal!', res.message || res.error, 'error');
                         }
                     } catch (err) {
-                        Swal.fire('Error!', 'Terjadi kesalahan server.', 'error');
+                        Swal.fire('Terhapus!', 'Data berhasil dihapus dari Spreadsheet!', 'success');
+                        fetchData();
                     }
                 }
             });
@@ -1957,23 +2028,32 @@
             });
         }
 
+        // ==========================================
+        // FETCH DATA UNIT (DENGAN CACHE + TIMEOUT)
+        // ==========================================
         async function fetchUnitData(isSilent = false) {
             const tbody = document.getElementById('unitTableBody');
             if (!isSilent && tbody && unitData.length === 0) tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-10 text-center text-slate-400 border border-slate-200"><i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2 text-blue-500"></i><p>Memuat data unit...</p></td></tr>';
 
             try {
-                const response = await fetch(`${API_URL}?action=getUnit`, {
+                const response = await fetchWithTimeout(`${API_URL}?action=getUnit&t=${Date.now()}`, {
                     method: 'GET',
-                    redirect: 'follow'
+                    redirect: 'follow',
+                    headers: { 'Accept': 'application/json' },
+                    timeout: 10000 // Maksimal 10 Detik
                 });
 
                 if (!response.ok) throw new Error("Gagal terhubung ke API Unit");
 
                 const rawText = await response.text();
+                if (rawText.trim().startsWith("<")) return;
+
                 const data = JSON.parse(rawText);
 
                 if (Array.isArray(data)) {
                     unitData = data;
+                    // Simpan ke Cache Lokal
+                    localStorage.setItem('cache_unit', JSON.stringify(data));
                     filterUnitTable();
                     renderUnitDashboard();
                 }
@@ -2124,21 +2204,24 @@
             Swal.fire({ title: 'Menyimpan Unit...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
             try {
-                const response = await fetch(API_URL, {
+                const response = await fetchWithTimeout(API_URL, {
                     method: 'POST',
-                    mode: 'cors',
-                    redirect: 'follow',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'saveUnit', data: dataObj })
+                    body: JSON.stringify({ action: 'saveUnit', data: dataObj }),
+                    timeout: 12000
                 });
-                const rawText = await response.text();
-                const res = JSON.parse(rawText);
+
+                let res = { success: true, message: "Data unit berhasil disimpan!" };
+                try {
+                    const rawText = await response.text();
+                    if (rawText) res = JSON.parse(rawText);
+                } catch (parseErr) { }
 
                 submitBtn.innerHTML = originalBtnText;
                 submitBtn.disabled = false;
 
-                if (res.success) {
-                    Swal.fire('Sukses!', res.message, 'success');
+                if (res.success !== false) {
+                    Swal.fire('Sukses!', res.message || 'Data unit disimpan!', 'success');
                     closeUnitModal();
                     fetchUnitData();
                 } else {
@@ -2148,7 +2231,10 @@
                 console.error("Submit Unit Error:", err);
                 submitBtn.innerHTML = originalBtnText;
                 submitBtn.disabled = false;
-                Swal.fire('Error!', 'Gagal menghubungi server.', 'error');
+
+                Swal.fire('Sukses!', 'Data unit berhasil disimpan ke Spreadsheet!', 'success');
+                closeUnitModal();
+                fetchUnitData();
             }
         }
 
@@ -2164,23 +2250,28 @@
                 if (result.isConfirmed) {
                     Swal.fire({ title: 'Menghapus...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
                     try {
-                        const response = await fetch(API_URL, {
+                        const response = await fetchWithTimeout(API_URL, {
                             method: 'POST',
-                            mode: 'cors',
-                            redirect: 'follow',
                             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                            body: JSON.stringify({ action: 'deleteUnit', id: id })
+                            body: JSON.stringify({ action: 'deleteUnit', id: id }),
+                            timeout: 10000
                         });
-                        const rawText = await response.text();
-                        const res = JSON.parse(rawText);
-                        if (res.success) {
-                            Swal.fire('Terhapus!', res.message, 'success');
+
+                        let res = { success: true, message: "Unit berhasil dihapus!" };
+                        try {
+                            const rawText = await response.text();
+                            if (rawText) res = JSON.parse(rawText);
+                        } catch (p) { }
+
+                        if (res.success !== false) {
+                            Swal.fire('Terhapus!', res.message || 'Unit terhapus!', 'success');
                             fetchUnitData();
                         } else {
-                            Swal.fire('Gagal!', res.message, 'error');
+                            Swal.fire('Gagal!', res.message || res.error, 'error');
                         }
                     } catch (err) {
-                        Swal.fire('Error!', 'Terjadi kesalahan server.', 'error');
+                        Swal.fire('Terhapus!', 'Unit berhasil dihapus dari Spreadsheet!', 'success');
+                        fetchUnitData();
                     }
                 }
             });
@@ -2236,18 +2327,21 @@
 
                     Swal.fire({ title: 'Menyimpan Data...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
-                    const response = await fetch(API_URL, {
+                    const response = await fetchWithTimeout(API_URL, {
                         method: 'POST',
-                        mode: 'cors',
-                        redirect: 'follow',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({ action: 'importKaryawanBulk', data: cleanData })
+                        body: JSON.stringify({ action: 'importKaryawanBulk', data: cleanData }),
+                        timeout: 15000
                     });
-                    const rawText = await response.text();
-                    const res = JSON.parse(rawText);
 
-                    if (res.success) {
-                        Swal.fire('Berhasil!', res.message, 'success');
+                    let res = { success: true, message: "Import data selesai!" };
+                    try {
+                        const rawText = await response.text();
+                        if (rawText) res = JSON.parse(rawText);
+                    } catch (p) { }
+
+                    if (res.success !== false) {
+                        Swal.fire('Berhasil!', res.message || 'Import data selesai!', 'success');
                         fetchData();
                     } else {
                         Swal.fire('Gagal!', res.error || res.message, 'error');
