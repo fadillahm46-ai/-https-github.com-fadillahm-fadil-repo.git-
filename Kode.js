@@ -14,12 +14,12 @@ function doGet(e) {
   // Jika dipanggil oleh Vercel via fetch dengan parameter action
   if (e && e.parameter && e.parameter.action) {
     const action = e.parameter.action;
-    
+
     if (action === 'getKaryawan') {
       return ContentService.createTextOutput(getDataKaryawan())
         .setMimeType(ContentService.MimeType.JSON);
     }
-    
+
     if (action === 'getUnit') {
       return ContentService.createTextOutput(getDataUnit())
         .setMimeType(ContentService.MimeType.JSON);
@@ -68,8 +68,8 @@ function setupDatabase() {
   if (!sheet) {
     sheet = ss.insertSheet('Data Karyawan');
     const headers = [
-      "ID", "NRP", "Nama", "Perusahaan", "Jabatan", "TglLahir", 
-      "ExpSIMPER_BIB", "ExpSIMPER_TIA", "ExpSIM_B2", "TglMCU", "ExpMCU", 
+      "ID", "NRP", "Nama", "Perusahaan", "Jabatan", "TglLahir",
+      "ExpSIMPER_BIB", "ExpSIMPER_TIA", "ExpSIM_B2", "TglMCU", "ExpMCU",
       "TglLOTOTO", "ExpDangerTag", "TglAwareness", "ExpKetinggian", "TglSIO", "ExpSIO"
     ];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -94,18 +94,18 @@ function setupDatabase() {
 function getDataKaryawan() {
   const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
   if (!sheet) return JSON.stringify([]);
-  
+
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return JSON.stringify([]);
-  
+
   const data = sheet.getRange(1, 1, lastRow, 17).getValues();
   const headers = data[0];
   const result = [];
-  
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (!row[1]) continue; // Skip jika NRP kosong
-    
+
     let obj = {};
     for (let j = 0; j < headers.length; j++) {
       let val = row[j];
@@ -119,7 +119,7 @@ function getDataKaryawan() {
     }
     result.push(obj);
   }
-  return JSON.stringify(result); 
+  return JSON.stringify(result);
 }
 
 function saveKaryawan(formData) {
@@ -127,7 +127,7 @@ function saveKaryawan(formData) {
     const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
     const data = sheet.getDataRange().getValues();
     const id = formData.ID || Utilities.getUuid();
-    
+
     const rowData = [
       id, formData.NRP || "", formData.Nama || "", formData.Perusahaan || "", formData.Jabatan || "", formData.TglLahir || "",
       formData.ExpSIMPER_BIB || "", formData.ExpSIMPER_TIA || "", formData.ExpSIM_B2 || "", formData.TglMCU || "", formData.ExpMCU || "",
@@ -168,14 +168,14 @@ function importKaryawanBulk(jsonData) {
     const sheet = getSpreadsheet().getSheetByName('Data Karyawan');
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
-    
+
     let updatedCount = 0; let newCount = 0;
 
     jsonData.forEach(item => {
-      if(!item.NRP) return; 
+      if (!item.NRP) return;
       const nrpString = String(item.NRP).trim();
       let rowIndex = -1;
-      
+
       for (let i = 1; i < data.length; i++) { if (String(data[i][1]).trim() === nrpString) { rowIndex = i + 1; break; } }
 
       let rowData = new Array(headers.length).fill("");
@@ -206,20 +206,20 @@ function importKaryawanBulk(jsonData) {
 function getDataUnit() {
   const sheet = getSpreadsheet().getSheetByName('Data Unit');
   if (!sheet) return JSON.stringify([]);
-  
+
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
   if (lastRow <= 1) return JSON.stringify([]);
-  
+
   const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
   const headers = data[0];
   const result = [];
-  
-  for(let i=1; i<data.length; i++) {
+
+  for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if(!row[1]) continue;
+    if (!row[1]) continue;
     let obj = {};
-    for(let j=0; j<headers.length; j++) {
+    for (let j = 0; j < headers.length; j++) {
       let val = row[j];
       if (val instanceof Date) {
         const y = val.getFullYear();
@@ -241,12 +241,12 @@ function saveUnit(formData) {
     const id = formData.ID || Utilities.getUuid();
     const noUnit = (formData.NoUnit || "").trim().toUpperCase();
 
-    const rowData = [ id, noUnit, formData.Model || "", formData.ExpKom_BIB || "", formData.ExpKom_TIA || "", formData.ExpKom_TMA || "" ];
-    
+    const rowData = [id, noUnit, formData.Model || "", formData.ExpKom_BIB || "", formData.ExpKom_TIA || "", formData.ExpKom_TMA || ""];
+
     let rowIndex = -1;
     for (let i = 1; i < data.length; i++) { if (data[i][0] == formData.ID || data[i][1] == noUnit) { rowIndex = i + 1; break; } }
 
-    if (rowIndex > -1) { sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]); return { success: true, message: "Data Unit diperbarui!" }; } 
+    if (rowIndex > -1) { sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]); return { success: true, message: "Data Unit diperbarui!" }; }
     else { sheet.appendRow(rowData); return { success: true, message: "Data Unit baru ditambahkan!" }; }
   } catch (err) { return { success: false, error: err.message }; }
 }
